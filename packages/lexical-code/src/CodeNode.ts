@@ -16,30 +16,36 @@ import type {
   LexicalNode,
   NodeKey,
   ParagraphNode,
+  PointType,
   RangeSelection,
   SerializedElementNode,
   Spread,
   TabNode,
+  TextNode,
 } from 'lexical';
-
-import './CodeHighlighterPrism';
 
 import {addClassNamesToElement, isHTMLElement} from '@lexical/utils';
 import {
   $applyNodeReplacement,
   $createLineBreakNode,
   $createParagraphNode,
-  $createTabNode,
-  $isTabNode,
-  $isTextNode,
   ElementNode,
 } from 'lexical';
 
-import {
-  $createCodeHighlightNode,
-  $isCodeHighlightNode,
-  getFirstCodeNodeOfLine,
-} from './CodeHighlightNode';
+type Highlighting = {
+  mapToPrismLanguage: (
+    language: string | null | undefined,
+  ) => string | null | undefined;
+  textNodeCheck: (
+    firstSelectionNode: ElementNode | TextNode,
+    anchor: PointType,
+  ) => void;
+};
+
+export const highlighting: Highlighting = {
+  mapToPrismLanguage: () => undefined,
+  textNodeCheck: () => undefined,
+};
 
 export type SerializedCodeNode = Spread<
   {
@@ -47,15 +53,6 @@ export type SerializedCodeNode = Spread<
   },
   SerializedElementNode
 >;
-
-const mapToPrismLanguage = (
-  language: string | null | undefined,
-): string | null | undefined => {
-  // eslint-disable-next-line no-prototype-builtins
-  return language != null && window.Prism.languages.hasOwnProperty(language)
-    ? language
-    : undefined;
-};
 
 function hasChildDOMNodeTag(node: Node, tagName: string) {
   for (const child of node.childNodes) {
@@ -84,7 +81,7 @@ export class CodeNode extends ElementNode {
 
   constructor(language?: string | null | undefined, key?: NodeKey) {
     super(key);
-    this.__language = mapToPrismLanguage(language);
+    this.__language = highlighting.mapToPrismLanguage(language);
   }
 
   // View
@@ -246,47 +243,9 @@ export class CodeNode extends ElementNode {
     const {anchor, focus} = selection;
     const firstPoint = anchor.isBefore(focus) ? anchor : focus;
     const firstSelectionNode = firstPoint.getNode();
-    if ($isTextNode(firstSelectionNode)) {
-      let node = getFirstCodeNodeOfLine(firstSelectionNode);
-      const insertNodes = [];
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        if ($isTabNode(node)) {
-          insertNodes.push($createTabNode());
-          node = node.getNextSibling();
-        } else if ($isCodeHighlightNode(node)) {
-          let spaces = 0;
-          const text = node.getTextContent();
-          const textSize = node.getTextContentSize();
-          while (spaces < textSize && text[spaces] === ' ') {
-            spaces++;
-          }
-          if (spaces !== 0) {
-            insertNodes.push($createCodeHighlightNode(' '.repeat(spaces)));
-          }
-          if (spaces !== textSize) {
-            break;
-          }
-          node = node.getNextSibling();
-        } else {
-          break;
-        }
-      }
-      const split = firstSelectionNode.splitText(anchor.offset)[0];
-      const x = anchor.offset === 0 ? 0 : 1;
-      const index = split.getIndexWithinParent() + x;
-      const codeNode = firstSelectionNode.getParentOrThrow();
-      const nodesToInsert = [$createLineBreakNode(), ...insertNodes];
-      codeNode.splice(index, 0, nodesToInsert);
-      const last = insertNodes[insertNodes.length - 1];
-      if (last) {
-        last.select();
-      } else if (anchor.offset === 0) {
-        split.selectPrevious();
-      } else {
-        split.getNextSibling()!.selectNext(0, 0);
-      }
-    }
+
+    highlighting.textNodeCheck(firstSelectionNode, anchor);
+
     if ($isCodeNode(firstSelectionNode)) {
       const {offset} = selection.anchor;
       firstSelectionNode.splice(offset, 0, [$createLineBreakNode()]);
@@ -310,7 +269,7 @@ export class CodeNode extends ElementNode {
 
   setLanguage(language: string): void {
     const writable = this.getWritable();
-    writable.__language = mapToPrismLanguage(language);
+    writable.__language = highlighting.mapToPrismLanguage(language);
   }
 
   getLanguage(): string | null | undefined {
